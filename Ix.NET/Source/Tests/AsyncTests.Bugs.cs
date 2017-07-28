@@ -1,23 +1,22 @@
-﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
-#if !NO_TPL
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the Apache 2.0 License.
+// See the LICENSE file in the project root for more information. 
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Xunit;
 using System.Collections;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Diagnostics;
-//using System.Reactive.Linq;
-//using System.Reactive.Concurrency;
 
 namespace Tests
 {
     public partial class AsyncTests
     {
-        [TestInitialize]
-        public void InitTests()
+        public AsyncTests()
         {
             TaskScheduler.UnobservedTaskException += (o, e) =>
             {
@@ -25,7 +24,7 @@ namespace Tests
         }
 
         /*
-        [TestMethod]
+        [Fact]
         public void TestPushPopAsync()
         {
             var stack = new Stack<int>();
@@ -44,7 +43,7 @@ namespace Tests
             // we give it a timeout so the test can fail instead of hang
             task.Wait(TimeSpan.FromSeconds(2));
 
-            Assert.AreEqual(10, stack.Count);
+            Assert.Equal(10, stack.Count);
         }
 
         private Task DoSomethingAsync(IObservable<int> observable, Stack<int> stack)
@@ -79,7 +78,7 @@ namespace Tests
             return tcs.Task;
         }
         */
-
+#if !NO_THREAD
         static IEnumerable<int> Xs(Action a)
         {
             try
@@ -97,55 +96,65 @@ namespace Tests
                 a();
             }
         }
+#endif
 
-        [TestMethod]
-        public void CorrectDispose()
+        [Fact]
+        public async void CorrectDispose()
         {
-            var disposed = false;
+            var disposed = new TaskCompletionSource<bool>();
 
             var xs = new[] { 1, 2, 3 }.WithDispose(() =>
             {
-                disposed = true;
+                disposed.TrySetResult(true);
             }).ToAsyncEnumerable();
 
             var ys = xs.Select(x => x + 1);
 
             var e = ys.GetEnumerator();
+
+            // We have to call move next because otherwise the internal enumerator is never allocated
+            await e.MoveNext();
             e.Dispose();
 
-            Assert.IsTrue(disposed);
+            await disposed.Task;
 
-            Assert.IsFalse(e.MoveNext().Result);
+            Assert.True(disposed.Task.Result);
+
+            Assert.False(e.MoveNext().Result);
+
+            var next = await e.MoveNext();
+            Assert.False(next);
         }
 
-        [TestMethod]
-        public void DisposesUponError()
+        [Fact]
+        public async Task DisposesUponError()
         {
-            var disposed = false;
+            var disposed = new TaskCompletionSource<bool>();
 
             var xs = new[] { 1, 2, 3 }.WithDispose(() =>
             {
-                disposed = true;
+                disposed.SetResult(true);
             }).ToAsyncEnumerable();
 
             var ex = new Exception("Bang!");
             var ys = xs.Select(x => { if (x == 1) throw ex; return x; });
 
             var e = ys.GetEnumerator();
-            AssertThrows<Exception>(() => e.MoveNext());
+            await Assert.ThrowsAsync<Exception>(() => e.MoveNext());
 
-            Assert.IsTrue(disposed);
+            var result = await disposed.Task;
+            Assert.True(result);
         }
 
-        [TestMethod]
-        public void CorrectCancel()
+        [Fact]
+        public async Task CorrectCancel()
         {
-            var disposed = false;
+            var disposed = new TaskCompletionSource<bool>();
 
-            var xs = new[] { 1, 2, 3 }.WithDispose(() =>
+            var xs = new CancellationTestAsyncEnumerable().WithDispose(() =>
             {
-                disposed = true;
-            }).ToAsyncEnumerable();
+                disposed.TrySetResult(true);
+            });
 
             var ys = xs.Select(x => x + 1).Where(x => true);
 
@@ -157,7 +166,7 @@ namespace Tests
 
             try
             {
-                t.Wait();
+                t.Wait(WaitTimeoutMs);
             }
             catch
             {
@@ -171,17 +180,18 @@ namespace Tests
                 // it. This design is chosen because cancelling a MoveNext call leaves
                 // the enumerator in an indeterminate state. Further interactions with
                 // it should be forbidden.
-                Assert.IsTrue(disposed);
+
+                var result = await disposed.Task;
+                Assert.True(result);
             }
 
-            Assert.IsFalse(e.MoveNext().Result);
+            Assert.False(await e.MoveNext());
         }
 
-        [TestMethod]
+        [Fact]
         public void CanCancelMoveNext()
         {
-            var evt = new ManualResetEvent(false);
-            var xs = Blocking(evt).ToAsyncEnumerable().Select(x => x).Where(x => true);
+            var xs = new CancellationTestAsyncEnumerable().Select(x => x).Where(x => true);
 
             var e = xs.GetEnumerator();
             var cts = new CancellationTokenSource();
@@ -191,21 +201,228 @@ namespace Tests
 
             try
             {
-                t.Wait();
-                Assert.Fail();
+                t.Wait(WaitTimeoutMs);
+                Assert.True(false);
             }
             catch
             {
-                Assert.IsTrue(t.IsCanceled);
+                Assert.True(t.IsCanceled);
+            }
+        }
+
+        /// <summary>
+        /// Waits WaitTimeoutMs or until cancellation is requested. If cancellation was not requested, MoveNext returns true.
+        /// </summary>
+        internal sealed class CancellationTestAsyncEnumerable : IAsyncEnumerable<int>
+        {
+            private readonly int iterationsBeforeDelay;
+
+            public CancellationTestAsyncEnumerable(int iterationsBeforeDelay = 0)
+            {
+                this.iterationsBeforeDelay = iterationsBeforeDelay;
+            }
+            IAsyncEnumerator<int> IAsyncEnumerable<int>.GetEnumerator() => GetEnumerator();
+
+            public TestEnumerator GetEnumerator() => new TestEnumerator(iterationsBeforeDelay);
+
+
+            internal sealed class TestEnumerator : IAsyncEnumerator<int>
+            {
+                private readonly int iterationsBeforeDelay;
+
+                public TestEnumerator(int iterationsBeforeDelay)
+                {
+                    this.iterationsBeforeDelay = iterationsBeforeDelay;
+                }
+                int i = -1;
+                public void Dispose()
+                {
+                }
+
+                public CancellationToken LastToken { get; private set; }
+                public bool MoveNextWasCalled { get; private set; }
+
+                public int Current => i;
+                
+                public async Task<bool> MoveNext(CancellationToken cancellationToken)
+                {
+                    LastToken = cancellationToken;
+                    MoveNextWasCalled = true;
+                  
+                    i++;
+                    if (Current >= iterationsBeforeDelay)
+                    {
+                        await Task.Delay(WaitTimeoutMs, cancellationToken);
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return true;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Waits WaitTimeoutMs or until cancellation is requested. If cancellation was not requested, MoveNext returns true.
+        /// </summary>
+        private sealed class CancellationTestEnumerable<T> : IEnumerable<T>
+        {
+            public CancellationTestEnumerable()
+            {
+            }
+            public IEnumerator<T> GetEnumerator() => new TestEnumerator();
+
+            private sealed class TestEnumerator : IEnumerator<T>
+            {
+                private readonly CancellationTokenSource cancellationTokenSource;
+
+                public TestEnumerator()
+                {
+                    cancellationTokenSource = new CancellationTokenSource();
+                }
+                public void Dispose()
+                {
+                    cancellationTokenSource.Cancel();
+                }
+
+                public void Reset()
+                {
+                  
+                }
+
+                object IEnumerator.Current => Current;
+
+                public T Current { get; }
+
+                public bool MoveNext()
+                {
+                    Task.Delay(WaitTimeoutMs, cancellationTokenSource.Token).Wait();
+                    cancellationTokenSource.Token.ThrowIfCancellationRequested();
+                    return true;
+                }
             }
 
+            IEnumerator IEnumerable.GetEnumerator()
+            {
+                return GetEnumerator();
+            }
+        }
+
+        [Fact]
+        public void ToAsyncEnumeratorCannotCancelOnceRunning()
+        {
+            var evt = new ManualResetEvent(false);
+            var isRunningEvent = new ManualResetEvent(false);
+            var xs = Blocking(evt, isRunningEvent).ToAsyncEnumerable();
+
+            var e = xs.GetEnumerator();
+            var cts = new CancellationTokenSource();
+
+
+            Task<bool> t = null;
+            var tMoveNext =Task.Run(
+                () =>
+                {
+                    // This call *will* block
+                    t = e.MoveNext(cts.Token);
+                });
+         
+
+            isRunningEvent.WaitOne();
+            cts.Cancel();
+
+            try
+            {
+                tMoveNext.Wait(0);
+                Assert.False(t.IsCanceled);
+            }
+            catch
+            {
+                // T will still be null
+                Assert.Null(t);
+            }
+
+
+            // enable it to finish
             evt.Set();
         }
 
-        static IEnumerable<int> Blocking(ManualResetEvent evt)
+        static IEnumerable<int> Blocking(ManualResetEvent evt, ManualResetEvent blockingStarted)
         {
+            blockingStarted.Set();
             evt.WaitOne();
             yield return 42;
+        }
+
+        [Fact]
+        public async Task TakeOneFromSelectMany()
+        {
+            var enumerable = AsyncEnumerable
+                .Return(0)
+                .SelectMany(_ => AsyncEnumerable.Return("Check"))
+                .Take(1)
+                .Do(_ => { });
+
+            Assert.Equal("Check", await enumerable.First());
+        }
+
+        [Fact]
+        public void SelectManyDisposeInvokedOnlyOnce()
+        {
+            var disposeCounter = new DisposeCounter();
+
+            var result = AsyncEnumerable.Return(1).SelectMany(i => disposeCounter).Select(i => i).ToList().Result;
+
+            Assert.Equal(0, result.Count);
+            Assert.Equal(1, disposeCounter.DisposeCount);
+        }
+
+        [Fact]
+        public void SelectManyInnerDispose()
+        {
+            var disposes = Enumerable.Range(0, 10).Select(_ => new DisposeCounter()).ToList();
+
+            var result = AsyncEnumerable.Range(0, 10).SelectMany(i => disposes[i]).Select(i => i).ToList().Result;
+
+            Assert.Equal(0, result.Count);
+            Assert.True(disposes.All(d => d.DisposeCount == 1));
+        }
+
+        [Fact]
+        public void DisposeAfterCreation()
+        {
+            var enumerable = AsyncEnumerable.Return(0) as IDisposable;
+            enumerable?.Dispose();
+        }
+
+        private class DisposeCounter : IAsyncEnumerable<object>
+        {
+            public int DisposeCount { get; private set; }
+
+            public IAsyncEnumerator<object> GetEnumerator()
+            {
+                return new Enumerator(this);
+            }
+
+            private class Enumerator : IAsyncEnumerator<object>
+            {
+                private readonly DisposeCounter _disposeCounter;
+
+                public Enumerator(DisposeCounter disposeCounter)
+                {
+                    _disposeCounter = disposeCounter;
+                }
+
+                public void Dispose()
+                {
+                    _disposeCounter.DisposeCount++;
+                }
+
+                public Task<bool> MoveNext(CancellationToken _)
+                {
+                    return Task.Factory.StartNew(() => false);
+                }
+
+                public object Current { get; private set; }
+            }
         }
     }
 
@@ -217,6 +434,15 @@ namespace Tests
             {
                 var e = source.GetEnumerator();
                 return new Enumerator<T>(e.MoveNext, () => e.Current, () => { e.Dispose(); a(); });
+            });
+        }
+
+        public static IAsyncEnumerable<T> WithDispose<T>(this IAsyncEnumerable<T> source, Action a)
+        {
+            return AsyncEnumerable.CreateEnumerable<T>(() =>
+            {
+                var e = source.GetEnumerator();
+                return AsyncEnumerable.CreateEnumerator<T>(e.MoveNext, () => e.Current, () => { e.Dispose(); a(); });
             });
         }
 
@@ -261,5 +487,3 @@ namespace Tests
 
     }
 }
-
-#endif

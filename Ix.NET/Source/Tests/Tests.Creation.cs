@@ -1,22 +1,25 @@
-﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the Apache 2.0 License.
+// See the LICENSE file in the project root for more information. 
 using System;
 using System.Text;
 using System.Collections.Generic;
 using System.Linq;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Xunit;
 using System.Collections;
+using System.Threading;
 
 namespace Tests
 {
     public partial class Tests
     {
-        [TestMethod]
+        [Fact]
         public void Create_Arguments()
         {
             AssertThrows<ArgumentNullException>(() => EnumerableEx.Create<int>(default(Func<IEnumerator<int>>)));
         }
 
-        [TestMethod]
+        [Fact]
         public void Create1()
         {
             var hot = false;
@@ -26,10 +29,10 @@ namespace Tests
                 return MyEnumerator();
             });
 
-            Assert.IsFalse(hot);
+            Assert.False(hot);
 
             var e = res.GetEnumerator();
-            Assert.IsTrue(hot);
+            Assert.True(hot);
 
             HasNext(e, 1);
             HasNext(e, 2);
@@ -37,29 +40,71 @@ namespace Tests
 
             hot = false;
             var f = ((IEnumerable)res).GetEnumerator();
-            Assert.IsTrue(hot);
+            Assert.True(hot);
         }
 
-#if HAS_AWAIT
-        [TestMethod]
+        [Fact]
         public void CreateYield()
         {
+            SynchronizationContext.SetSynchronizationContext(null);
+
             var xs = EnumerableEx.Create<int>(async yield => {
                 var i = 0;
-                while (i < 10) {
+                while (i < 10)
+                {
                     await yield.Return(i++);
                 }
             });
 
             int j = 0;
-            foreach (int elem in xs) {
-                Assert.AreEqual(elem, j);
+            foreach (int elem in xs)
+            {
+                Assert.Equal(elem, j);
                 j++;
             }
 
-            Assert.AreEqual(j, 10);
+            Assert.Equal(j, 10);
         }
-#endif 
+
+        [Fact]
+        public void CreateYieldBreak()
+        {
+            SynchronizationContext.SetSynchronizationContext(null);
+
+            var xs = EnumerableEx.Create<int>(async yield => {
+                var i = 0;
+                while (true)
+                {
+                    if (i == 10)
+                    {
+                        await yield.Break();
+                        return;
+                    }
+
+                    await yield.Return(i++);
+                }
+            });
+
+            int j = 0;
+            foreach (int elem in xs)
+            {
+                Assert.Equal(elem, j);
+                j++;
+            }
+
+            Assert.Equal(j, 10);
+        }
+
+        [Fact]
+        public void YielderNoReset()
+        {
+            var xs = EnumerableEx.Create<int>(async yield => {
+               await yield.Break();
+            });
+
+            AssertThrows<NotSupportedException>(() => xs.GetEnumerator().Reset());
+        }
+
 
         private static IEnumerator<int> MyEnumerator()
         {
@@ -67,19 +112,19 @@ namespace Tests
             yield return 2;
         }
 
-        [TestMethod]
+        [Fact]
         public void Return()
         {
-            Assert.AreEqual(42, EnumerableEx.Return(42).Single());
+            Assert.Equal(42, EnumerableEx.Return(42).Single());
         }
 
-        [TestMethod]
+        [Fact]
         public void Throw_Arguments()
         {
             AssertThrows<ArgumentNullException>(() => EnumerableEx.Throw<int>(null));
         }
 
-        [TestMethod]
+        [Fact]
         public void Throw()
         {
             var ex = new MyException();
@@ -89,13 +134,13 @@ namespace Tests
             AssertThrows<MyException>(() => e.MoveNext());
         }
 
-        [TestMethod]
+        [Fact]
         public void Defer_Arguments()
         {
             AssertThrows<ArgumentNullException>(() => EnumerableEx.Defer<int>(null));
         }
 
-        [TestMethod]
+        [Fact]
         public void Defer1()
         {
             var i = 0;
@@ -106,17 +151,17 @@ namespace Tests
                 return Enumerable.Range(0, n);
             });
 
-            Assert.AreEqual(0, i);
+            Assert.Equal(0, i);
 
-            Assert.IsTrue(Enumerable.SequenceEqual(xs, Enumerable.Range(0, n)));
-            Assert.AreEqual(1, i);
+            Assert.True(Enumerable.SequenceEqual(xs, Enumerable.Range(0, n)));
+            Assert.Equal(1, i);
 
             n = 3;
-            Assert.IsTrue(Enumerable.SequenceEqual(xs, Enumerable.Range(0, n)));
-            Assert.AreEqual(2, i);
+            Assert.True(Enumerable.SequenceEqual(xs, Enumerable.Range(0, n)));
+            Assert.Equal(2, i);
         }
 
-        [TestMethod]
+        [Fact]
         public void Defer2()
         {
             var xs = EnumerableEx.Defer<int>(() =>
@@ -127,7 +172,7 @@ namespace Tests
             AssertThrows<MyException>(() => xs.GetEnumerator().MoveNext());
         }
 
-        [TestMethod]
+        [Fact]
         public void Generate_Arguments()
         {
             AssertThrows<ArgumentNullException>(() => EnumerableEx.Generate<int, int>(0, null, _ => _, _ => _));
@@ -135,61 +180,61 @@ namespace Tests
             AssertThrows<ArgumentNullException>(() => EnumerableEx.Generate<int, int>(0, _ => true, _ => _, null));
         }
 
-        [TestMethod]
+        [Fact]
         public void Generate()
         {
             var res = EnumerableEx.Generate(0, x => x < 5, x => x + 1, x => x * x).ToList();
-            Assert.IsTrue(Enumerable.SequenceEqual(res, new[] { 0, 1, 4, 9, 16 }));
+            Assert.True(Enumerable.SequenceEqual(res, new[] { 0, 1, 4, 9, 16 }));
         }
 
-        [TestMethod]
+        [Fact]
         public void Using_Arguments()
         {
             AssertThrows<ArgumentNullException>(() => EnumerableEx.Using<int, MyDisposable>(null, d => new[] { 1 }));
             AssertThrows<ArgumentNullException>(() => EnumerableEx.Using<int, MyDisposable>(() => new MyDisposable(), null));
         }
 
-        [TestMethod]
+        [Fact]
         public void Using1()
         {
             var d = default(MyDisposable);
 
             var xs = EnumerableEx.Using(() => d = new MyDisposable(), d_ => new[] { 1 });
-            Assert.IsNull(d);
+            Assert.Null(d);
 
             var d1 = default(MyDisposable);
-            xs.ForEach(_ => { d1 = d; Assert.IsNotNull(d1); Assert.IsFalse(d1.Done); });
-            Assert.IsTrue(d1.Done);
+            xs.ForEach(_ => { d1 = d; Assert.NotNull(d1); Assert.False(d1.Done); });
+            Assert.True(d1.Done);
 
             var d2 = default(MyDisposable);
-            xs.ForEach(_ => { d2 = d; Assert.IsNotNull(d2); Assert.IsFalse(d2.Done); });
-            Assert.IsTrue(d2.Done);
+            xs.ForEach(_ => { d2 = d; Assert.NotNull(d2); Assert.False(d2.Done); });
+            Assert.True(d2.Done);
 
-            Assert.AreNotSame(d1, d2);
+            Assert.NotSame(d1, d2);
         }
 
-        [TestMethod]
+        [Fact]
         public void Using2()
         {
             var d = default(MyDisposable);
 
             var xs = EnumerableEx.Using(() => d = new MyDisposable(), d_ => EnumerableEx.Throw<int>(new MyException()));
-            Assert.IsNull(d);
+            Assert.Null(d);
 
             AssertThrows<MyException>(() => xs.ForEach(_ => { }));
-            Assert.IsTrue(d.Done);
+            Assert.True(d.Done);
         }
 
-        [TestMethod]
+        [Fact]
         public void Using3()
         {
             var d = default(MyDisposable);
 
             var xs = EnumerableEx.Using<int, MyDisposable>(() => d = new MyDisposable(), d_ => { throw new MyException(); });
-            Assert.IsNull(d);
+            Assert.Null(d);
 
             AssertThrows<MyException>(() => xs.ForEach(_ => { }));
-            Assert.IsTrue(d.Done);
+            Assert.True(d.Done);
         }
 
         class MyDisposable : IDisposable
@@ -202,15 +247,15 @@ namespace Tests
             }
         }
 
-        [TestMethod]
+        [Fact]
         public void RepeatElementInfinite()
         {
             var xs = EnumerableEx.Repeat(42).Take(1000);
-            Assert.IsTrue(xs.All(x => x == 42));
-            Assert.IsTrue(xs.Count() == 1000);
+            Assert.True(xs.All(x => x == 42));
+            Assert.True(xs.Count() == 1000);
         }
 
-        [TestMethod]
+        [Fact]
         public void RepeatSequence_Arguments()
         {
             AssertThrows<ArgumentNullException>(() => EnumerableEx.Repeat<int>(null));
@@ -218,28 +263,28 @@ namespace Tests
             AssertThrows<ArgumentOutOfRangeException>(() => EnumerableEx.Repeat<int>(new[] { 1 }, -1));
         }
 
-        [TestMethod]
+        [Fact]
         public void RepeatSequence1()
         {
             var i = 0;
             var xs = new[] { 1, 2 }.Do(_ => i++).Repeat();
 
             var res = xs.Take(10).ToList();
-            Assert.AreEqual(10, res.Count);
-            Assert.IsTrue(res.Buffer(2).Select(b => b.Sum()).All(x => x == 3));
-            Assert.AreEqual(10, i);
+            Assert.Equal(10, res.Count);
+            Assert.True(res.Buffer(2).Select(b => b.Sum()).All(x => x == 3));
+            Assert.Equal(10, i);
         }
 
-        [TestMethod]
+        [Fact]
         public void RepeatSequence2()
         {
             var i = 0;
             var xs = new[] { 1, 2 }.Do(_ => i++).Repeat(5);
 
             var res = xs.ToList();
-            Assert.AreEqual(10, res.Count);
-            Assert.IsTrue(res.Buffer(2).Select(b => b.Sum()).All(x => x == 3));
-            Assert.AreEqual(10, i);
+            Assert.Equal(10, res.Count);
+            Assert.True(res.Buffer(2).Select(b => b.Sum()).All(x => x == 3));
+            Assert.Equal(10, i);
         }
     }
 }

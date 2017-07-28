@@ -28,6 +28,7 @@ local.properties
 # PDT-specific
 .buildpath
 
+_NCrunch*
 
 #################
 ## Visual Studio
@@ -64,7 +65,7 @@ local.properties
 *.dotCover
 
 ## TODO: If you have NuGet Package Restore enabled, uncomment this
-#packages/
+packages/
 
 # Visual C++ cache files
 ipch/
@@ -106,6 +107,9 @@ ClientBin
 stylecop.*
 ~$*
 *.dbmdl
+.vs/
+*.lock.json
+artifacts/
 Generated_Code #added for RIA/Silverlight projects
 
 # Backup & report files from converting an old project file to a newer
@@ -167,3 +171,11 @@ Rx.NET/tools/HomoIcon/HomoIcon.sln.ide/
 Rx.NET/Test/Rx/packages/
 Rx.NET/Samples/Portable/Portable.sln.ide/
 Rx.NET/Samples/Portable/packages/
+
+*.nupkg
+*.nuget.props
+*.nuget.targets
+nuget.exe
+
+# dotnet local cache
+.dotnet

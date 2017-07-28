@@ -1,75 +1,96 @@
-﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
-#if !NO_TPL
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the Apache 2.0 License.
+// See the LICENSE file in the project root for more information. 
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Xunit;
 using System.Threading.Tasks;
 using System.Threading;
 
 namespace Tests
 {
-    static class Ext
-    {
-        public static Task<bool> MoveNext<T>(this IAsyncEnumerator<T> enumerator)
-        {
-            return enumerator.MoveNext(CancellationToken.None);
-        }
-    }
-
     public partial class AsyncTests
     {
-        [TestMethod]
+
+        [Fact]
+        public void Create_Null()
+        {
+            AssertThrows<ArgumentNullException>(() => AsyncEnumerable.CreateEnumerable<int>(null));
+            AssertThrows<ArgumentNullException>(() => AsyncEnumerable.CreateEnumerator<int>(null, () => 3, () => {}));
+       
+        }
+
+        [Fact]
+        public void Create_Iterator_Throws()
+        {
+     
+           var iter = AsyncEnumerable.CreateEnumerator<int>(c => Task.FromResult(true), () => 3, () => { });
+
+            var enu = (IAsyncEnumerable<int>)iter;
+
+            AssertThrows<NotSupportedException>(() => enu.GetEnumerator());
+        }
+
+
+        [Fact]
         public void Return()
         {
             var xs = AsyncEnumerable.Return(42);
             HasNext(xs.GetEnumerator(), 42);
         }
 
-        [TestMethod]
+        [Fact]
         public void Never()
         {
             var xs = AsyncEnumerable.Never<int>();
 
             var e = xs.GetEnumerator();
-            Assert.IsFalse(e.MoveNext().IsCompleted); // Very rudimentary check
+            Assert.False(e.MoveNext().IsCompleted); // Very rudimentary check
             AssertThrows<InvalidOperationException>(() => Nop(e.Current));
             e.Dispose();
         }
 
-        [TestMethod]
+        [Fact]
+        public async Task Empty_Null()
+        {
+           await Assert.ThrowsAsync<ArgumentNullException>(() => AsyncEnumerable.IsEmpty<int>(null));
+           await Assert.ThrowsAsync<ArgumentNullException>(() => AsyncEnumerable.IsEmpty<int>(null, CancellationToken.None));
+        }
+
+        [Fact]
         public void Empty1()
         {
             var xs = AsyncEnumerable.Empty<int>();
             NoNext(xs.GetEnumerator());
         }
 
-        [TestMethod]
+        [Fact]
         public void Empty2()
         {
             var xs = AsyncEnumerable.Empty<int>();
 
             var e = xs.GetEnumerator();
-            Assert.IsFalse(e.MoveNext().Result);
+            Assert.False(e.MoveNext().Result);
             AssertThrows<InvalidOperationException>(() => Nop(e.Current));
         }
 
-        [TestMethod]
+        [Fact]
         public void Throw_Null()
         {
             AssertThrows<ArgumentNullException>(() => AsyncEnumerable.Throw<int>(null));
         }
 
-        [TestMethod]
+        [Fact]
         public void Throw()
         {
             var ex = new Exception("Bang");
             var xs = AsyncEnumerable.Throw<int>(ex);
 
             var e = xs.GetEnumerator();
-            AssertThrows<Exception>(() => e.MoveNext().Wait(), ex_ => ((AggregateException)ex_).InnerExceptions.Single() == ex);
+            AssertThrows<Exception>(() => e.MoveNext().Wait(WaitTimeoutMs), ex_ => ((AggregateException)ex_).InnerExceptions.Single() == ex);
             AssertThrows<InvalidOperationException>(() => Nop(e.Current));
         }
 
@@ -77,13 +98,13 @@ namespace Tests
         {
         }
 
-        [TestMethod]
+        [Fact]
         public void Range_Null()
         {
             AssertThrows<ArgumentOutOfRangeException>(() => AsyncEnumerable.Range(0, -1));
         }
 
-        [TestMethod]
+        [Fact]
         public void Range1()
         {
             var xs = AsyncEnumerable.Range(2, 5);
@@ -97,7 +118,7 @@ namespace Tests
             NoNext(e);
         }
 
-        [TestMethod]
+        [Fact]
         public void Range2()
         {
             var xs = AsyncEnumerable.Range(2, 0);
@@ -106,13 +127,13 @@ namespace Tests
             NoNext(e);
         }
 
-        [TestMethod]
+        [Fact]
         public void Repeat_Null()
         {
             AssertThrows<ArgumentOutOfRangeException>(() => AsyncEnumerable.Repeat(0, -1));
         }
 
-        [TestMethod]
+        [Fact]
         public void Repeat1()
         {
             var xs = AsyncEnumerable.Repeat(2, 5);
@@ -126,7 +147,7 @@ namespace Tests
             NoNext(e);
         }
 
-        [TestMethod]
+        [Fact]
         public void Repeat2()
         {
             var xs = AsyncEnumerable.Repeat(2, 0);
@@ -135,7 +156,7 @@ namespace Tests
             NoNext(e);
         }
 
-        [TestMethod]
+        [Fact]
         public void Repeat3()
         {
             var xs = AsyncEnumerable.Repeat(2);
@@ -149,13 +170,21 @@ namespace Tests
             e.Dispose();
         }
 
-        [TestMethod]
+        [Fact]
+        public async Task Repeat4()
+        {
+            var xs = AsyncEnumerable.Repeat(2).Take(5);
+
+            await SequenceIdentity(xs);
+        }
+
+        [Fact]
         public void Defer_Null()
         {
             AssertThrows<ArgumentNullException>(() => AsyncEnumerable.Defer<int>(null));
         }
 
-        [TestMethod]
+        [Fact]
         public void Defer1()
         {
             var x = 0;
@@ -175,7 +204,7 @@ namespace Tests
             }
         }
 
-        [TestMethod]
+        [Fact]
         public void Generate_Null()
         {
             AssertThrows<ArgumentNullException>(() => AsyncEnumerable.Generate<int, int>(0, null, x => x, x => x));
@@ -183,7 +212,7 @@ namespace Tests
             AssertThrows<ArgumentNullException>(() => AsyncEnumerable.Generate<int, int>(0, x => true, x => x, null));
         }
 
-        [TestMethod]
+        [Fact]
         public void Generate1()
         {
             var xs = AsyncEnumerable.Generate(0, x => x < 5, x => x + 1, x => x * x);
@@ -198,17 +227,17 @@ namespace Tests
             e.Dispose();
         }
 
-        [TestMethod]
+        [Fact]
         public void Generate2()
         {
             var ex = new Exception("Bang!");
             var xs = AsyncEnumerable.Generate(0, x => { throw ex; }, x => x + 1, x => x * x);
 
             var e = xs.GetEnumerator();
-            AssertThrows<Exception>(() => e.MoveNext().Wait(), ex_ => ((AggregateException)ex_).InnerExceptions.Single() == ex);
+            AssertThrows<Exception>(() => e.MoveNext().Wait(WaitTimeoutMs), ex_ => ((AggregateException)ex_).InnerExceptions.Single() == ex);
         }
 
-        [TestMethod]
+        [Fact]
         public void Generate3()
         {
             var ex = new Exception("Bang!");
@@ -216,10 +245,10 @@ namespace Tests
 
             var e = xs.GetEnumerator();
             HasNext(e, 0);
-            AssertThrows<Exception>(() => e.MoveNext().Wait(), ex_ => ((AggregateException)ex_).InnerExceptions.Single() == ex);
+            AssertThrows<Exception>(() => e.MoveNext().Wait(WaitTimeoutMs), ex_ => ((AggregateException)ex_).InnerExceptions.Single() == ex);
         }
 
-        [TestMethod]
+        [Fact]
         public void Generate4()
         {
             var ex = new Exception("Bang!");
@@ -227,17 +256,25 @@ namespace Tests
 
             var e = xs.GetEnumerator();
             HasNext(e, 0);
-            AssertThrows<Exception>(() => e.MoveNext().Wait(), ex_ => ((AggregateException)ex_).InnerExceptions.Single() == ex);
+            AssertThrows<Exception>(() => e.MoveNext().Wait(WaitTimeoutMs), ex_ => ((AggregateException)ex_).InnerExceptions.Single() == ex);
         }
 
-        [TestMethod]
+        [Fact]
+        public async Task Generate5()
+        {
+            var xs = AsyncEnumerable.Generate(0, x => x < 5, x => x + 1, x => x * x);
+
+            await SequenceIdentity(xs);
+        }
+
+        [Fact]
         public void Using_Null()
         {
             AssertThrows<ArgumentNullException>(() => AsyncEnumerable.Using<int, IDisposable>(null, _ => null));
             AssertThrows<ArgumentNullException>(() => AsyncEnumerable.Using<int, IDisposable>(() => new MyD(null), null));
         }
 
-        [TestMethod]
+        [Fact]
         public void Using1()
         {
             var i = 0;
@@ -252,13 +289,13 @@ namespace Tests
                 _ => AsyncEnumerable.Return(42)
             );
 
-            Assert.AreEqual(0, i);
+            Assert.Equal(0, i);
 
             var e = xs.GetEnumerator();
-            Assert.AreEqual(1, i);
+            Assert.Equal(1, i);
         }
 
-        [TestMethod]
+        [Fact]
         public void Using2()
         {
             var i = 0;
@@ -273,16 +310,16 @@ namespace Tests
                 _ => AsyncEnumerable.Return(42)
             );
 
-            Assert.AreEqual(0, i);
+            Assert.Equal(0, i);
 
             var e = xs.GetEnumerator();
-            Assert.AreEqual(1, i);
+            Assert.Equal(1, i);
 
             e.Dispose();
-            Assert.AreEqual(1, d);
+            Assert.Equal(1, d);
         }
 
-        [TestMethod]
+        [Fact]
         public void Using3()
         {
             var ex = new Exception("Bang!");
@@ -298,84 +335,84 @@ namespace Tests
                 _ => { throw ex; }
             );
 
-            Assert.AreEqual(0, i);
+            Assert.Equal(0, i);
 
             AssertThrows<Exception>(() => xs.GetEnumerator(), ex_ => ex_ == ex);
             
-            Assert.AreEqual(1, d);
+            Assert.Equal(1, d);
         }
 
-        [TestMethod]
+        [Fact]
         public void Using4()
         {
             var i = 0;
-            var disposed = false;
+            var disposed = new TaskCompletionSource<bool>();
 
             var xs = AsyncEnumerable.Using(
                 () =>
                 {
                     i++;
-                    return new MyD(() => { disposed = true; });
+                    return new MyD(() => { disposed.TrySetResult(true); });
                 },
                 _ => AsyncEnumerable.Return(42)
             );
 
-            Assert.AreEqual(0, i);
+            Assert.Equal(0, i);
 
             var e = xs.GetEnumerator();
-            Assert.AreEqual(1, i);
+            Assert.Equal(1, i);
 
             HasNext(e, 42);
             NoNext(e);
 
-            Assert.IsTrue(disposed);
+            Assert.True(disposed.Task.Result);
         }
 
-        [TestMethod]
+        [Fact]
         public void Using5()
         {
             var ex = new Exception("Bang!");
             var i = 0;
-            var disposed = false;
+            var disposed = new TaskCompletionSource<bool>();
 
             var xs = AsyncEnumerable.Using(
                 () =>
                 {
                     i++;
-                    return new MyD(() => { disposed = true; });
+                    return new MyD(() => { disposed.TrySetResult(true); });
                 },
                 _ => AsyncEnumerable.Throw<int>(ex)
             );
 
-            Assert.AreEqual(0, i);
+            Assert.Equal(0, i);
 
             var e = xs.GetEnumerator();
-            Assert.AreEqual(1, i);
+            Assert.Equal(1, i);
 
-            AssertThrows<Exception>(() => e.MoveNext().Wait(), ex_ => ((AggregateException)ex_).Flatten().InnerExceptions.Single() == ex);
+            AssertThrows<Exception>(() => e.MoveNext().Wait(WaitTimeoutMs), ex_ => ((AggregateException)ex_).Flatten().InnerExceptions.Single() == ex);
 
-            Assert.IsTrue(disposed);
+            Assert.True(disposed.Task.Result);
         }
 
-        [TestMethod]
-        public void Using6()
+        [Fact]
+        public async Task Using6()
         {
             var i = 0;
-            var disposed = false;
+            var disposed = new TaskCompletionSource<bool>();
 
             var xs = AsyncEnumerable.Using(
                 () =>
                 {
                     i++;
-                    return new MyD(() => { disposed = true; });
+                    return new MyD(() => { disposed.TrySetResult(true); });
                 },
-                _ => AsyncEnumerable.Range(0, 10)
+                _ => new CancellationTestAsyncEnumerable(2) // need to use this to verify we actually cancel
             );
 
-            Assert.AreEqual(0, i);
+            Assert.Equal(0, i);
 
             var e = xs.GetEnumerator();
-            Assert.AreEqual(1, i);
+            Assert.Equal(1, i);
 
             HasNext(e, 0);
             HasNext(e, 1);
@@ -384,9 +421,35 @@ namespace Tests
             var t = e.MoveNext(cts.Token);
             cts.Cancel();
 
-            t.Wait();
+            try
+            {
+                t.Wait(WaitTimeoutMs);
+            }
+            catch (AggregateException ex)
+            {
+                ex.Flatten().Handle(inner => inner is TaskCanceledException);
+            }
 
-            Assert.IsTrue(disposed);
+            Assert.True(disposed.Task.IsCompleted);
+            Assert.True(await disposed.Task);
+        }
+
+        [Fact]
+        public async Task Using7()
+        {
+            var i = 0;
+            var d = 0;
+
+            var xs = AsyncEnumerable.Using(
+                () =>
+                {
+                    i++;
+                    return new MyD(() => { d++; });
+                },
+                _ => AsyncEnumerable.Return(42)
+            );
+
+            await SequenceIdentity(xs);
         }
 
         class MyD : IDisposable
@@ -405,5 +468,3 @@ namespace Tests
         }
     }
 }
-
-#endif
